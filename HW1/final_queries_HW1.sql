@@ -91,8 +91,28 @@ WHERE dense_rank_1 = 1;
 
 #*************************************************************************#
 #Query #5 - The most perseverant ones!
-#Who are the people that belong to a country that has NEVER hosted the Olympics, that have competed, without ever winning a medal,
-#on the SAME SPORT, for the greatest number of olympic games (at least twice)
+#Who are the people  that have competed, without ever winning a medal,
+#on the SAME DISCIPLINE (not sport, but discipline), for the greatest number of olympic games (at least twice)
 #*************************************************************************#
 
-
+WITH perseverants AS (
+SELECT a.person_id AS person, b.event_id AS discipline, COUNT(*) AS total_participations
+FROM olympics_changed.games_competitor AS a 
+LEFT JOIN olympics_changed.competitor_event AS b
+ON a.id = b.competitor_id
+WHERE person_id NOT IN(	SELECT DISTINCT(person_id)
+						FROM olympics_changed.games_competitor a 
+						LEFT JOIN olympics_changed.competitor_event b
+						ON a.id = b.competitor_id
+						WHERE medal_id <> 4)
+GROUP BY a.person_id, b.event_id
+HAVING total_participations > 1
+ORDER BY total_participations DESC)
+SELECT person, full_name, gender, height, weight, region_name, discipline, event_name, total_participations 
+FROM perseverants
+LEFT JOIN olympics_changed.event AS event_table
+ON perseverants.discipline = event_table.id
+LEFT JOIN (	SELECT eins.id, eins.full_name, eins.gender, eins.height, eins.weight, drei.region_name
+			FROM olympics_changed.person AS eins, olympics_changed.person_region AS zwei, olympics_changed.noc_region AS drei
+			WHERE eins.id = zwei.person_id AND zwei.region_id = drei.id) AS detail_table
+ON person = detail_table.id;
