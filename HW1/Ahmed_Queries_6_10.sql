@@ -1,7 +1,7 @@
 # DB Pre-Processing:
 # 1. Combine games_city & city into games_city
 # 2. Combine noc_region & city into person_region into person_region
-
+##################################################################
 # Q6
 # What countries won medals in the Swimming games, 
 # and what is the medal counts per each country?.
@@ -30,35 +30,8 @@ AND pr.region_id = nr.id
 GROUP BY  m.medal_name, nr.region_name
 ORDER BY nr.region_name, number_medals DESC
 ;
-
+##################################################################
 # Q7
-# List the sports played by tallest people ever. 
-# And list their nationalities, age and genders?
-# Execution time: ~ 80 Seconds.
-SELECT s.sport_name, 
-	   MAX(p.height) as max_height, 
-       p.gender,
-       nr.region_name
-FROM olympics.competitor_event ce,
-	 olympics.event e,
-     olympics.sport s,
-     olympics.games_competitor gc,
-     olympics.person p,
-     olympics.person_region pr,
-     olympics.noc_region nr
-     
-WHERE ce.event_id = e.id
-AND e.sport_id  = s.id
-AND gc.id = ce.competitor_id
-AND p.id = gc.person_id
-AND pr.person_id = p.id
-AND pr.region_id = nr.id
-
-GROUP BY s.sport_name
-ORDER BY max_height DESC
-;
-
-# Q8
 # What's the age of the oldest persons who won a Golden medal
 # for each country and what is their sport?
 # Execution time: ~ 1 Seconds.
@@ -87,7 +60,34 @@ AND pr.region_id = nr.id
 GROUP BY nr.region_name
 ORDER BY oldest_winner_age DESC
 ;
+##################################################################
+# Q8
+# List the sports played by tallest people ever. 
+# And list their nationalities, age and genders?
+# Execution time: ~ 80 Seconds.
+SELECT s.sport_name, 
+	   MAX(p.height) as max_height, 
+       p.gender,
+       nr.region_name
+FROM olympics.competitor_event ce,
+	 olympics.event e,
+     olympics.sport s,
+     olympics.games_competitor gc,
+     olympics.person p,
+     olympics.person_region pr,
+     olympics.noc_region nr
+     
+WHERE ce.event_id = e.id
+AND e.sport_id  = s.id
+AND gc.id = ce.competitor_id
+AND p.id = gc.person_id
+AND pr.person_id = p.id
+AND pr.region_id = nr.id
 
+GROUP BY s.sport_name
+ORDER BY max_height DESC
+;
+##################################################################
 # Q9
 # List the total number of won medals for each country. 
 # And for which sport each country won the highest number of these medals?
@@ -99,6 +99,7 @@ ORDER BY oldest_winner_age DESC
 # 2. Create a temporary table to display the dominant sport for each 
 # 	country and the number of won medals for this sport.
 # 3. Join them together.
+################################
 WITH 
 	# 1. A Temporary table to display the total number of won medals 
     # for each country.
@@ -166,7 +167,7 @@ FROM total
 JOIN dominant
 ON total.region_name = dominant.region_name
 ;
-
+##################################################################
 # Q10
 # What is the percentage of number of won medals 
 # for each country over the last ten years compared to 
@@ -178,7 +179,7 @@ ON total.region_name = dominant.region_name
 # 2. Then List the same over last 10 years (from 2006 until 2016).
 # 3. Divide 2 by 1, then multiply by 100 to get the percentage 
 # 	 of last 10 years medals.
-###############################################################
+################################
 SELECT region_name, 
        tot20years_num_medals,
        (tot20years_num_medals - last10years_num_medals) AS '1896-2015',
