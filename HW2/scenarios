@@ -1,1 +1,7 @@
+We decided to run 3 scenarios: 
+
+    * Scenario #1: here we use the optimized database as it contains both 17 indexes and also contraints.
+    * Scenario #2: this corresponds to a less optimized database as we removed the contraints but kept the 17 indexes. 
+    * Scenario #3: this corresponds to the most basic form of database, which doesn't have any type of optimization. We removed both the constraints and the indexes. 
+    
 
