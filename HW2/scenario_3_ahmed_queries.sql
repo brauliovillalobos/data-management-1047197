@@ -32,27 +32,39 @@ ORDER BY pr.region_name, number_medals DESC
 # What's the age of the oldest persons who won a Golden medal
 # for each country and what is their sport?
 # Execution time: ~ 1 Seconds.
-SELECT pr.region_name, 
-	   p.full_name, 
-	   MAX(age) as oldest_winner_age, 
-       s.sport_name
-FROM olympics_scen_3.medal m,
-	 olympics_scen_3.competitor_event ce,
-     olympics_scen_3.event e,
-     olympics_scen_3.sport s,
-     olympics_scen_3.games_competitor gc,
-	 olympics_scen_3.person p,
-     olympics_scen_3.person_region pr
-     
-WHERE m.id = ce.medal_id
-AND ce.event_id = e.id
-AND e.sport_id  = s.id
-AND ce.competitor_id = gc.id
-AND m.medal_name = 'Gold'
-AND p.id = gc.person_id
-AND pr.person_id = p.id
+WITH
+	all_ AS (
+		SELECT gc.age,
+			   pr.region_name,
+               p.full_name, 
+               s.sport_name
+		FROM olympics_scen_3.medal m,
+			 olympics_scen_3.competitor_event ce,
+			 olympics_scen_3.event e,
+			 olympics_scen_3.sport s,
+			 olympics_scen_3.games_competitor gc,
+			 olympics_scen_3.person p,
+			 olympics_scen_3.person_region pr
+			 
+		WHERE m.id = ce.medal_id
+		AND ce.event_id = e.id
+		AND e.sport_id  = s.id
+		AND ce.competitor_id = gc.id
+		AND m.medal_name = 'Gold'
+		AND p.id = gc.person_id
+		AND pr.person_id = p.id),
+	
+    oldest_p AS (
+		SELECT region_name, 
+			   MAX(age) AS oldest_winner_age
+		FROM all_
+        GROUP BY region_name)
 
-GROUP BY pr.region_name
+SELECT oldest_p.region_name, oldest_winner_age, full_name, sport_name
+FROM oldest_p
+JOIN all_
+ON all_.region_name = oldest_p.region_name
+AND all_.age = oldest_p.oldest_winner_age
 ORDER BY oldest_winner_age DESC
 ;
 ##################################################################
@@ -60,24 +72,41 @@ ORDER BY oldest_winner_age DESC
 # List the sports played by tallest people ever. 
 # And list their nationalities, age and genders?
 # Execution time: ~ 5 Seconds.
-SELECT s.sport_name, 
-	   MAX(p.height) as max_height, 
-       p.gender,
-       pr.region_name
-FROM olympics_scen_3.competitor_event ce,
-	 olympics_scen_3.event e,
-     olympics_scen_3.sport s,
-     olympics_scen_3.games_competitor gc,
-     olympics_scen_3.person p,
-     olympics_scen_3.person_region pr
-     
-WHERE ce.event_id = e.id
-AND e.sport_id  = s.id
-AND gc.id = ce.competitor_id
-AND p.id = gc.person_id
-AND pr.person_id = p.id
-
-GROUP BY s.sport_name
+WITH 
+	all_ AS (
+		SELECT s.sport_name, 
+			   p.height, 
+			   p.gender,
+			   pr.region_name,
+               gc.age
+		FROM olympics_scen_3.competitor_event ce,
+			 olympics_scen_3.event e,
+			 olympics_scen_3.sport s,
+			 olympics_scen_3.games_competitor gc,
+			 olympics_scen_3.person p,
+			 olympics_scen_3.person_region pr
+			 
+		WHERE ce.event_id = e.id
+		AND e.sport_id  = s.id
+		AND gc.id = ce.competitor_id
+		AND p.id = gc.person_id
+		AND pr.person_id = p.id),
+        
+	tallest AS (
+		SELECT sport_name, 
+			   MAX(height) as max_height
+		FROM all_
+		GROUP BY sport_name
+        )
+SELECT all_.sport_name, 
+	   max_height,
+       region_name,
+       gender,
+       age
+FROM all_
+JOIN tallest
+ON all_.height = tallest.max_height
+AND all_.sport_name = tallest.sport_name
 ORDER BY max_height DESC
 ;
 ##################################################################
@@ -121,13 +150,63 @@ WITH
     # 2. A temporary table to display the dominant sport for each 
 	# country and the number of won medals for this sport.
     dominant AS (
-		SELECT region_name, 
-			   sport_name AS dominant_sport, 
-			   MAX(tot_num_medals) AS dominant_num_medals
-		FROM (
+		WITH 
+			# region_name, sport_name, tot_num_medals
+            all_ AS (
+				SELECT pr.region_name, 
+					   s.sport_name AS dominant_sport, 
+					   COUNT(m.medal_name) AS tot_num_medals
+				FROM olympics_scen_3.medal m,
+					 olympics_scen_3.competitor_event ce,
+					 olympics_scen_3.event e,
+					 olympics_scen_3.sport s,
+					 olympics_scen_3.games_competitor gc,
+					 olympics_scen_3.person p,
+					 olympics_scen_3.person_region pr
+
+				WHERE m.id = ce.medal_id
+				AND ce.event_id = e.id
+				AND e.sport_id  = s.id
+				AND ce.competitor_id = gc.id
+				AND p.id = gc.person_id
+				AND pr.person_id = p.id
+				AND m.medal_name != 'NA'
+				
+				GROUP BY pr.region_name, s.sport_name),
+			
+            # region_name, MAX(tot_num_medals) AS dominant_num_medals
+            tempo AS (
+				SELECT region_name, 
+					   MAX(tot_num_medals) AS dominant_num_medals
+				FROM all_
+
+				GROUP BY region_name)
+    
+    
+		SELECT all_.region_name, 
+			   dominant_sport,
+               dominant_num_medals
+		FROM all_ JOIN tempo
+        ON all_.tot_num_medals = tempo.dominant_num_medals
+        AND all_.region_name = tempo.region_name)
+
+SELECT total.*, 
+	   dominant.dominant_sport, 
+       dominant.dominant_num_medals
+FROM total
+JOIN dominant
+ON total.region_name = dominant.region_name
+ORDER BY tot_num_medals DESC
+;
+##################################################################
+# Same question, simpler logic for HW2
+# Execution time: ~ 5 Seconds.
+################################
+WITH 
+	all_ AS (
 		SELECT pr.region_name, 
 			   s.sport_name, 
-               COUNT(m.medal_name) AS tot_num_medals
+			   COUNT(m.medal_name) AS num_medals
 		FROM olympics_scen_3.medal m,
 			 olympics_scen_3.competitor_event ce,
 			 olympics_scen_3.event e,
@@ -144,50 +223,30 @@ WITH
 		AND pr.person_id = p.id
 		AND m.medal_name != 'NA'
 		
-		GROUP BY pr.region_name, s.sport_name
-		ORDER BY tot_num_medals DESC) subquery
-
-		GROUP BY region_name)
-
-SELECT total.*, 
-	   dominant.dominant_sport, 
-       dominant.dominant_num_medals
-FROM total
-JOIN dominant
-ON total.region_name = dominant.region_name
-;
-##################################################################
-# Same question, simpler logic for HW2
-# Execution time: ~ 5 Seconds.
-################################
-SELECT region_name, 
-	   SUM(num_medals) AS tot_num_medals, 
-       sport_name AS dominan_sport, 
-       num_medals AS dominan_num_medals
-FROM (
-	SELECT pr.region_name, 
-		   s.sport_name, 
-		   COUNT(m.medal_name) AS num_medals
-	FROM olympics_scen_3.medal m,
-		 olympics_scen_3.competitor_event ce,
-		 olympics_scen_3.event e,
-		 olympics_scen_3.sport s,
-		 olympics_scen_3.games_competitor gc,
-		 olympics_scen_3.person p,
-		 olympics_scen_3.person_region pr
-
-	WHERE m.id = ce.medal_id
-	AND ce.event_id = e.id
-	AND e.sport_id  = s.id
-	AND ce.competitor_id = gc.id
-	AND p.id = gc.person_id
-	AND pr.person_id = p.id
-	AND m.medal_name != 'NA'
+		GROUP BY pr.region_name, s.sport_name),
 	
-	GROUP BY pr.region_name, s.sport_name
-	ORDER BY num_medals DESC) subquery
+    tot AS (
+		SELECT region_name, 
+			   SUM(num_medals) AS tot_num_medals
+		FROM all_
+        GROUP BY region_name),
+	dominant AS (
+		SELECT region_name, 
+			   MAX(num_medals) AS dominant_num_medals
+        FROM all_
+        GROUP BY region_name
+    )
 
-GROUP BY region_name
+SELECT all_.region_name,
+	   tot.tot_num_medals,
+       all_.sport_name AS dominant_sport,
+       dominant.dominant_num_medals
+
+FROM all_ JOIN tot
+ON all_.region_name = tot.region_name
+JOIN dominant
+ON all_.region_name = dominant.region_name
+AND all_.num_medals = dominant.dominant_num_medals        
 ORDER BY tot_num_medals DESC
 ;
 ##################################################################
