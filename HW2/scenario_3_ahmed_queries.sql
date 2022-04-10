@@ -160,40 +160,35 @@ ON total.region_name = dominant.region_name
 # Same question, simpler logic for HW2
 # Execution time: ~ 5 Seconds.
 ################################
-WITH 
-	result AS(
-		SELECT pr.region_name, 
-			   s.sport_name, 
-			   COUNT(m.medal_name) AS tot_num_medals
-		FROM olympics_scen_3.medal m,
-			 olympics_scen_3.competitor_event ce,
-			 olympics_scen_3.event e,
-			 olympics_scen_3.sport s,
-			 olympics_scen_3.games_competitor gc,
-			 olympics_scen_3.person p,
-			 olympics_scen_3.person_region pr
+SELECT region_name, 
+	   SUM(num_medals) AS tot_num_medals, 
+       sport_name AS dominan_sport, 
+       num_medals AS dominan_num_medals
+FROM (
+	SELECT pr.region_name, 
+		   s.sport_name, 
+		   COUNT(m.medal_name) AS num_medals
+	FROM olympics_scen_3.medal m,
+		 olympics_scen_3.competitor_event ce,
+		 olympics_scen_3.event e,
+		 olympics_scen_3.sport s,
+		 olympics_scen_3.games_competitor gc,
+		 olympics_scen_3.person p,
+		 olympics_scen_3.person_region pr
 
-		WHERE m.id = ce.medal_id
-		AND ce.event_id = e.id
-		AND e.sport_id  = s.id
-		AND ce.competitor_id = gc.id
-		AND p.id = gc.person_id
-		AND pr.person_id = p.id
-		AND m.medal_name != 'NA'
+	WHERE m.id = ce.medal_id
+	AND ce.event_id = e.id
+	AND e.sport_id  = s.id
+	AND ce.competitor_id = gc.id
+	AND p.id = gc.person_id
+	AND pr.person_id = p.id
+	AND m.medal_name != 'NA'
+	
+	GROUP BY pr.region_name, s.sport_name
+	ORDER BY num_medals DESC) subquery
 
-		GROUP BY pr.region_name, s.sport_name
-		ORDER BY tot_num_medals DESC), 
-    
-	result2 AS (
-		SELECT region_name, 
-			   SUM(tot_num_medals) AS total_medals, 
-               sport_name AS dominant_sport, 
-			   MAX(tot_num_medals) AS dominant_num_medals 
-		FROM result 
-		GROUP BY region_name)
-
-SELECT * 
-FROM result2
+GROUP BY region_name
+ORDER BY tot_num_medals DESC
 ;
 ##################################################################
 # Q10
@@ -281,4 +276,67 @@ FROM (
 	RIGHT JOIN last10years
 	ON tot20years.region_name = last10years.region_name
 	WHERE tot20years.region_name IS NULL)) subquery
+;
+##################################################################
+# Q10, simpler logic for HW2
+# Execution time: ~ ? Seconds.
+################################
+SELECT region_name, 
+       tot20years_num_medals,
+       (tot20years_num_medals - last10years_num_medals) AS '1896-2015',
+       last10years_num_medals AS '2006-2016',
+       # 3. Divide 2 by 1, then multiply by 100 to get the percentage of last 10 years medals.
+       TRUNCATE(((last10years_num_medals / tot20years_num_medals) * 100), 2) AS last_10years_pct
+
+FROM (
+	WITH 
+		# 1. List the total number of medals from 1896 to 2006.
+		medals_per_country AS (
+			SELECT pr.region_name, 
+				   m.medal_name,
+				   g.games_year
+			FROM olympics_scen_3.medal m,
+				 olympics_scen_3.competitor_event ce,
+				 olympics_scen_3.event e,
+				 olympics_scen_3.sport s,
+				 olympics_scen_3.games_competitor gc,
+				 olympics_scen_3.games g,
+				 olympics_scen_3.person p,
+				 olympics_scen_3.person_region pr
+
+			WHERE m.id = ce.medal_id
+			AND ce.event_id = e.id
+			AND e.sport_id  = s.id
+			AND ce.competitor_id = gc.id
+			AND g.id = gc.games_id
+			AND p.id = gc.person_id
+			AND pr.person_id = p.id
+			AND m.medal_name != 'NA'),
+			
+		tot20years AS (
+			SELECT region_name,
+				   COUNT(medal_name) as tot20years_num_medals
+			FROM medals_per_country
+			GROUP BY region_name
+			ORDER BY tot20years_num_medals DESC),
+			
+		last10years AS (
+			SELECT region_name,
+				   COUNT(medal_name) as last10years_num_medals
+			FROM medals_per_country
+			WHERE games_year BETWEEN 2005 AND 2016
+			GROUP BY region_name
+			ORDER BY last10years_num_medals DESC)
+            
+	# FULL OUTER JOIN the previous two tables.
+	(SELECT tot20years.*, IFNULL(last10years.last10years_num_medals, 0) AS last10years_num_medals
+	FROM tot20years
+	LEFT JOIN last10years
+	ON tot20years.region_name = last10years.region_name)
+	UNION ALL
+	(SELECT tot20years.*, IFNULL(last10years.last10years_num_medals, 0) AS last10years_num_medals
+	FROM tot20years
+	RIGHT JOIN last10years
+	ON tot20years.region_name = last10years.region_name
+	WHERE tot20years.region_name IS NULL)) subquery	
 ;
