@@ -1,0 +1,235 @@
+#*************************************************************************#
+#Query #1
+#Which are the most popular cities in which the Olympics have taken place?
+# Number of tables used: 3
+
+# Logic of the query: We joined the tables that contain information about the Olympic Games
+# by using the keys between tables. We group by the names of the city and count how many
+# different games where hosted in each city. This Count is carried out in this form because of the
+# organization of the DB schema. Finally we order the resulting table in a descendent way according
+# to the number of games hosted.
+#*************************************************************************#
+
+[
+    {
+        '$project': {
+            'city_name': 1, 
+            'games_name': 1
+        }
+    }, {
+        '$group': {
+            '_id': {
+                'capital': '$city_name'
+            }, 
+            'game_ident': {
+                '$addToSet': '$games_name'
+            }
+        }
+    }, {
+        '$unwind': {
+            'path': '$game_ident', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$group': {
+            '_id': '$_id.capital', 
+            'sum': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'sum': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #2
+#Which are the most medal winner countries, in the 5 sports with most participants, 
+#from the Olympics that took place from 1960(exclusive) until 2016(exclusive)?
+
+# Number of tables used: 5
+
+# Logic of the query: We basically have to address some separated challenges.
+# First, we need to isolate information that comes only from the Olympic Games that were carried out between
+# the desired dates. This is carried out in the first FROM clause by means of the IN clause that produces the
+# 'principal' table. 
+# Second, we need to identify the 5 sports with the most participants ever. We do this in the secondary table
+# in the inner most query, we group by all the sports and count how many competitors each sport has had, we
+# order the table by number of total competitors and take the first 5 by using the LIMIT clause.alter
+# Then we take all competitors that have won a medal and that belong to those 5 sports
+# Finally, we join these two pieces of information, group by region_name and retrieve the desired answer.
+#*************************************************************************#
+
+[
+    {
+        '$group': {
+            '_id': '$sport_id', 
+            'total_sport': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total_sport': -1
+        }
+    }, {
+        '$limit': 5
+    }, {
+        '$out': '5_sports'
+    }
+]
+
+
+[
+    {
+        '$lookup': {
+            'from': 'query_2_5_sports', 
+            'localField': 'sport_id', 
+            'foreignField': '_id', 
+            'as': 'matching_sport'
+        }
+    }, {
+        '$match': {
+            'matching_sport': {
+                '$size': 1
+            }
+        }
+    }, {
+        '$match': {
+            '$or': [
+                {
+                    'medal_id': 1
+                }, {
+                    'medal_id': 2
+                }, {
+                    'medal_id': 3
+                }
+            ]
+        }
+    }, {
+        '$match': {
+            'games_year': {
+                '$gt': 1961, 
+                '$lt': 2015
+            }
+        }
+    }, {
+        '$group': {
+            '_id': '$region_name', 
+            'total': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #3
+#Which are the countries that have NEVER hosted the Olympics but have won the most number of medals? 
+
+# Number of tables used: 5
+
+# Basically we extract two pieces of information and then join them to answer the question. 
+# First, we select competitors along with their corresponding games that have won a medal. This in the fir table
+# Second, we identify the countries that have never hosted the olympics and select persons that
+# don't belong to those countries (by means of the NOT in clause). 
+# Finally, we join this information, we group by the name of the region (country) and count how many medal winners
+# each country has. 
+#*************************************************************************#
+
+[
+    {
+        '$group': {
+            '_id': '$country_name', 
+            'country_host': {
+                '$count': {}
+            }
+        }
+    }, {
+        '$out': 'query_3_host_countries'
+    }
+]
+
+
+[
+    {
+        '$lookup': {
+            'from': 'query_3_host_countries', 
+            'localField': 'region_name', 
+            'foreignField': '_id', 
+            'as': 'matching_host'
+        }
+    }, {
+        '$match': {
+            'matching_host': {
+                '$size': 0
+            }
+        }
+    }, {
+        '$match': {
+            '$or': [
+                {
+                    'medal_id': 1
+                }, {
+                    'medal_id': 2
+                }, {
+                    'medal_id': 3
+                }
+            ]
+        }
+    }, {
+        '$group': {
+            '_id': '$region_name', 
+            'total_medals': {
+                '$count': {}
+            }
+        }
+    }, {
+        '$sort': {
+            'total_medals': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #4
+#Who won a golden medal in her/his FIRST appearance in the Olympic games? Not only identify them but give some characteristics about them
+
+# Number of tables used: 5
+
+# Because of the DB schema, this is a simple question that needs more complex tools to be answered. Here we need to know, for each person_id,
+# which is the min games_year. Once I know that, we need three pieces of information: the competitor_id, the person_id to be able to identify the person
+# and the games_year to know when those games took place. Now, the problems: 1st: we group by the person_id, then we can't obtain the competitor_id. Since
+# 1 person can have multiple competitor_id's, we can't simply filter the games_competitor table based on the person_id, in order to obtain the competitor_id. 
+# 2nd: if the group by is dony by the competitor_id, then we would have the same person, with different competitor_id, winning medals not in their first appearance
+# but in other appearances. 
+
+# For these reasons, we make use of the dense rank. In the order_values table, we identify the persons along with their competitor_id's and the minimum year
+# of appearance. We group by person_id and the competitor_id and order the table by the person and year of first appearance. We then use the dense rank
+# to put a 1 for each different person_id, along with its competitor_id for the first olympic games they participated in. 
+# Then we just just join this information with some characteristics for each person and we make sure to just select those rows in which the dense_rank is equal to 1.
+#*************************************************************************#
+
+
+#*************************************************************************#
+#Query #5 - The most perseverant ones!
+#Who are the people  that have competed, without ever winning a medal,
+#on the SAME DISCIPLINE (not sport, but discipline), for the greatest number of olympic games (at least twice)
+
+# Number of tables used: 5
+
+# Here in the perseverants table we retrieve the persons, discipline and the total number of participations of those
+# who never won a medal. For this, we exploited the NOT IN clause as it is very difficult to know who has never won a medal with a single query
+# since we have to group by person_id and then select only those people that have a 4 in the medal column in ALL rows. This is hard to check. 
+# It is perfectly possible that one person has just 1 medal (1,2,3) and a lot of non medals (4) so we would have to check each row for each person
+# Therefore, we go opposite... we identify all people that HAS won at least one medal and then return all people that ARE NOT in that list (NOT IN clause)
+
+# Then we filter the groups by means of the HAVING clause so that we only have person with more than 1 participation. And we join this information
+# with the characteristics of the competitors.
+#*************************************************************************#
