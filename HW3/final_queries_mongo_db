@@ -77,7 +77,7 @@
     }, {
         '$limit': 5
     }, {
-        '$out': '5_sports'
+        '$out': 'query_2_5_sports'
     }
 ]
 
@@ -216,6 +216,57 @@
 # Then we just just join this information with some characteristics for each person and we make sure to just select those rows in which the dense_rank is equal to 1.
 #*************************************************************************#
 
+[
+    {
+        '$group': {
+            '_id': '$person_id', 
+            'first_parti': {
+                '$min': '$games_year'
+            }
+        }
+    }, {
+        '$out': 'query_4_min_year'
+    }
+]
+
+
+[
+    {
+        '$match': {
+            'medal_id': 1
+        }
+    }, {
+        '$lookup': {
+            'from': 'query_4_min_year', 
+            'localField': 'person_id', 
+            'foreignField': '_id', 
+            'as': 'first_appearance'
+        }
+    }, {
+        '$unwind': {
+            'path': '$first_appearance', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$match': {
+            '$expr': {
+                '$eq': [
+                    '$games_year', '$first_appearance.first_parti'
+                ]
+            }
+        }
+    }, {
+        '$project': {
+            'full_name': 1, 
+            'games_year': 1, 
+            'person_id': 1, 
+            'gender': 1, 
+            'height': 1, 
+            'weight': 1, 
+            'event_id': 1
+        }
+    }
+]
 
 #*************************************************************************#
 #Query #5 - The most perseverant ones!
