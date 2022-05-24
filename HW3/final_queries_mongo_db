@@ -284,3 +284,46 @@
 # Then we filter the groups by means of the HAVING clause so that we only have person with more than 1 participation. And we join this information
 # with the characteristics of the competitors.
 #*************************************************************************#
+
+[
+    {
+        '$match': {
+            'medal_id': 4
+        }
+    }, {
+        '$group': {
+            '_id': {
+                'person_id': '$person_id', 
+                'full_name': '$full_name', 
+                'sport_id': '$sport_id', 
+                'event_name': '$event_name'
+            }, 
+            'total_particip': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total_particip': -1
+        }
+    }, {
+        '$unwind': {
+            'path': '$first.person_id', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$addFields': {
+            'test.full_name': '$_id.full_name', 
+            'test._id': '$_id.person_id', 
+            'test.event_name': '$_id.event_name', 
+            'test.total_particip': '$total_particip'
+        }
+    }, {
+        '$replaceRoot': {
+            'newRoot': '$test'
+        }
+    }
+]
+
+
+
