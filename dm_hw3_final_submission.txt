@@ -1,0 +1,938 @@
+#########################################################################
+# Our GitHub Repo: https://github.com/brauliovillalobos/DM
+#########################################################################
+
+#*************************************************************************#
+#Homework 3 NoSQL - Data Management Course
+
+#Ahmed Omar & Braulio Villalobos
+#*************************************************************************#
+
+## The following lines correspond to the code used to replicate the Queries 1 to 5, of the HW1 and HW2, by using MongoDB. 
+## As exposed in the oral presentation, we decided to test 2 different approaches, as result: 
+##      * Queries 1 to 5: were implemented using MongoDB Compass and most specifically aggregation pipelines. 
+##      * Queries 6 to 10: were implemented using PyMongo in Python. 
+
+
+# FIRST APPROACH - MONGODB COMPASS - Queries 1 to 5
+
+# ****************Conversion of SQL to NoSQL******************************#
+#Firstly, the following code was used to Join all the tables of the original database into one single database. The fields that were repeated, since they were the keys between tables, 
+#were removed in such a way that we ended up without repeated fields. 
+
+SELECT principal.id, principal.games_id, principal.person_id, principal.age, games_division.games_year, games_division.games_name, 
+games_division.season,games_division.city_id, games_division.city_name, games_division.country_name, games_division.country_id,
+competition_division.event_id, competition_division.medal_id, competition_division.sport_id, competition_division.event_name,competition_division.sport_name,
+person_division.full_name, person_division.height, person_division.gender, person_division.weight, person_division.region_id, person_division.region_name
+FROM olympics_scen_1.games_competitor AS principal
+LEFT JOIN (SELECT a.id AS id_games, a.games_year, a.games_name, a.season,b.city_id,c.city_name, c.country_name,c.country_id 
+            FROM olympics_scen_1.games as a
+            LEFT JOIN olympics_scen_1.games_city as b
+            ON a.id = b.games_id
+            LEFT JOIN olympics_scen_1.city as c
+            ON b.city_id = c.id) AS games_division
+ON principal.games_id = games_division.id_games
+LEFT JOIN (SELECT f.event_id, f.competitor_id, f.medal_id, g.sport_id, g.event_name,h.sport_name
+            FROM olympics_scen_1.competitor_event as f
+            LEFT JOIN olympics_scen_1.event as g
+            ON f.event_id= g.id
+            LEFT JOIN olympics_scen_1.sport as h
+            ON g.sport_id= h.id) AS competition_division
+ON principal.id = competition_division.competitor_id
+LEFT JOIN (SELECT d.id, d.full_name, d.height, d.gender, d.weight, e.region_id, e.region_name
+            FROM olympics_scen_1.person as d
+            LEFT JOIN olympics_scen_1.person_region as e
+            ON d.id = e.person_id) AS person_division
+ON principal.person_id = person_division.id;
+
+#Secondly, we exported the results directly to a JSON format and saved it. The resulting Json document had the following format: 
+    {
+        "id" : 1,
+        "games_id" : 1,
+        "person_id" : 1,
+        "age" : 24,
+        "games_year" : 1992,
+        "games_name" : "1992 Summer",
+        "season" : "Summer",
+        "city_id" : 1,
+        "city_name" : "Barcelona",
+        "country_name" : "Spain",
+        "country_id" : 64,
+        "event_id" : 1,
+        "medal_id" : 4,
+        "sport_id" : 9,
+        "event_name" : "Basketball Men's Basketball",
+        "sport_name" : "Basketball",
+        "full_name" : "A Dijiang",
+        "height" : 180,
+        "gender" : "M",
+        "weight" : 80,
+        "region_id" : 42,
+        "region_name" : "China"
+    }
+
+# The whole document can be viewed and downloaded by following: https://github.com/brauliovillalobos/DM/tree/main/HW3/olympic_games_complete.json
+
+#Last, we import it into MongoDB Compass by means of the following command, which was run in the terminal: 
+
+mongoimport  --jsonArray /Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/II_Semester/DM/NoSQL/HW3/olympic_games_complete.json -d test -c olympics_games_total --drop
+
+#Once we created the collection in MongoDB Compass, we started to replicate the queries of HW1 and HW2 by means of aggregation pipelines. Following you can find the codes:
+
+#*************************************************************************#
+#Query #1
+#Which are the most popular cities in which the Olympics have taken place?
+
+#For this we first keep just 2 Keys of the Collection: city_name and games_name. Then we carry out some group clauses and finaly count to obtain the most popular cities
+#in which the Olympics have taken place.
+#*************************************************************************#
+
+[
+    {
+        '$project': {
+            'city_name': 1, 
+            'games_name': 1
+        }
+    }, {
+        '$group': {
+            '_id': {
+                'capital': '$city_name'
+            }, 
+            'game_ident': {
+                '$addToSet': '$games_name'
+            }
+        }
+    }, {
+        '$unwind': {
+            'path': '$game_ident', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$group': {
+            '_id': '$_id.capital', 
+            'sum': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'sum': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #2
+#Which are the most medal winner countries, in the 5 sports with most participants, from the Olympics that took place from 1960(exclusive) until 2016(exclusive)?
+
+#To answer this we need to first identify the 5 sports with the most participants in history, but we also need several others Keys to answer the rest of the query.
+#For this purpose we first create a collection in which we identify those 5 most popular sports, according to the historic number of participants. To do this
+#we just group by sport and sum, then we sort according to that sum (called total_sport), we then limit to only take the first 5 Documents and 
+#we create the collection query_2_5_sports by means of the "out" command
+
+
+#After it we make use of the lookup clause to create a new Key called matching_sport which is empty if the sport_id of the document isn't in the 5 _id of the query_2_5_sports collection
+#and NOT empty if it is. Then we use this matching_sport and its size to identify if the document belongs to one of the 5 most popular sports (previously identified) and keep only these documents. 
+#Then we make us of the match clause to guarantee that only medal winners and participations in Olympic games between the desired years are kept. Finally we group by region_name, count and sort. 
+#*************************************************************************#
+
+[
+    {
+        '$group': {
+            '_id': '$sport_id', 
+            'total_sport': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total_sport': -1
+        }
+    }, {
+        '$limit': 5
+    }, {
+        '$out': 'query_2_5_sports'
+    }
+]
+
+
+[
+    {
+        '$lookup': {
+            'from': 'query_2_5_sports', 
+            'localField': 'sport_id', 
+            'foreignField': '_id', 
+            'as': 'matching_sport'
+        }
+    }, {
+        '$match': {
+            'matching_sport': {
+                '$size': 1
+            }
+        }
+    }, {
+        '$match': {
+            '$or': [
+                {
+                    'medal_id': 1
+                }, {
+                    'medal_id': 2
+                }, {
+                    'medal_id': 3
+                }
+            ]
+        }
+    }, {
+        '$match': {
+            'games_year': {
+                '$gt': 1961, 
+                '$lt': 2015
+            }
+        }
+    }, {
+        '$group': {
+            '_id': '$region_name', 
+            'total': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #3
+#Which are the countries that have NEVER hosted the Olympics but have won the most number of medals? 
+
+#To answer this question we first make the collection query_3_host_countries that identify the countries in which the Olympics have taken place.
+#Then, using this collection and the lookup clause, we create the matching_host Key in the main collection such that, similarly to what we did on query 2, we identify
+#by means of the size of the matching_host key if the region_name belongs to the query_3_host_countries or not. In this way, if the matching_host is empty
+#we know that the region_name (to which each competitor belonged to) isn't present in the hosting countries and therefore that country has never hosted the Olympics. 
+#In this way, we keep only those competitors that belong to a country that have never hosted the Olympics. 
+#We then use the matching clause to keep only medal winners and the group and count to count, by country, which are the ones that have won the greater number of medals. 
+#*************************************************************************#
+
+[
+    {
+        '$group': {
+            '_id': '$country_name', 
+            'country_host': {
+                '$count': {}
+            }
+        }
+    }, {
+        '$out': 'query_3_host_countries'
+    }
+]
+
+
+[
+    {
+        '$lookup': {
+            'from': 'query_3_host_countries', 
+            'localField': 'region_name', 
+            'foreignField': '_id', 
+            'as': 'matching_host'
+        }
+    }, {
+        '$match': {
+            'matching_host': {
+                '$size': 0
+            }
+        }
+    }, {
+        '$match': {
+            '$or': [
+                {
+                    'medal_id': 1
+                }, {
+                    'medal_id': 2
+                }, {
+                    'medal_id': 3
+                }
+            ]
+        }
+    }, {
+        '$group': {
+            '_id': '$region_name', 
+            'total_medals': {
+                '$count': {}
+            }
+        }
+    }, {
+        '$sort': {
+            'total_medals': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #4
+#Who won a golden medal in his FIRST appearance in the Olympic games? 
+
+#For this we need to first identify the first appearance in the Olympic Games of each person (not competitor). This is easily done by a group clause over the person_id Key and
+#by using the min clause over the games_year. With this information, we create an auxiliary collection that stores the first year of appearance for each person_id. 
+
+#Then we keep only golden medal winners and we use the lookup to create a "first_appearance" Key from the previously created collection query_4_min_year. 
+#We then need to compare if the games_year of each document corresponds to the first appearance of tha person_id, but before we must unwind the first_appearance to take it out from the
+#Object and make the needed comparison. 
+#Then we make us of the clause "expr" coupled with "eq" which checks for equality between the first apperance of that person_id in Olympic Games and the year to which each document belongs to. 
+#We just keep documents where this equality holds. Finally we just make use of project clause to retrieve some details about the people that fulfilled the carried out steps. 
+
+#***Possible improvement***: By the end of this homework, when I was doing the Query #5, I discovered the addFields function. It is then possible to make an improvement to this query by
+#using the addFields function to create a new field that contains the first appearance in the Olympic Games by grouping by person_id. In this way it would be possible to skip two things: 
+#First, the creation of an auxiliary collection and second, the use of the lookup function, which actually slows down significantly the execution. 
+
+#***Note on Complexity***:
+#If we make a comparison of the complexity of the Query #4 in SQL and NoSQL Language it is possible to note a huge difference as the SQL language implementation makes use of a dense rank, along
+#with several joins between tables and the WITH clause. Identifying the first appearance of each person it's not an easy task in SQL, while in NoSQL is a very straightforward process. 
+#For this reason, this is taken as a significant advantage of NoSQL language over SQL, although this applies to this query, under this collection and this structure. 
+#It is therefore not a general advantage
+#as there are queries that are signifncalty more straightforward and simple in SQL than in NoSQL. 
+#*************************************************************************
+
+[
+    {
+        '$group': {
+            '_id': '$person_id', 
+            'first_parti': {
+                '$min': '$games_year'
+            }
+        }
+    }, {
+        '$out': 'query_4_min_year'
+    }
+]
+
+
+[
+    {
+        '$match': {
+            'medal_id': 1
+        }
+    }, {
+        '$lookup': {
+            'from': 'query_4_min_year', 
+            'localField': 'person_id', 
+            'foreignField': '_id', 
+            'as': 'first_appearance'
+        }
+    }, {
+        '$unwind': {
+            'path': '$first_appearance', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$match': {
+            '$expr': {
+                '$eq': [
+                    '$games_year', '$first_appearance.first_parti'
+                ]
+            }
+        }
+    }, {
+        '$project': {
+            'full_name': 1, 
+            'games_year': 1, 
+            'person_id': 1, 
+            'gender': 1, 
+            'height': 1, 
+            'weight': 1, 
+            'event_id': 1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #5 - 
+#Who are the people that have competed, without ever winning a medal, on the SAME DISCIPLINE for the greatest number of olympic games 
+
+#To answer this we keep only people that didn't win a medal, we then group by some fields that are useful for the final response and make a sum. 
+#We then sort, unwind and add new fields that are the ones we want to see in the final output. 
+
+#This query, as with query #4, has a relatively little complexity in MongoDB and in the approach we followed for first 5 queries (merging all SQL tables into 1 unique table and then converting
+#to NoSQL, to finally having one collection with 272k documents) with respect to the query that was needed in SQL language to give answer to the same question. This is then a significant advantage
+#of NoSQL as for this context it is significantly less complex than SQL.
+
+#*************************************************************************#
+
+[
+    {
+        '$match': {
+            'medal_id': 4
+        }
+    }, {
+        '$group': {
+            '_id': {
+                'person_id': '$person_id', 
+                'full_name': '$full_name', 
+                'sport_id': '$sport_id', 
+                'event_name': '$event_name'
+            }, 
+            'total_particip': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total_particip': -1
+        }
+    }, {
+        '$unwind': {
+            'path': '$first.person_id', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$addFields': {
+            'test.full_name': '$_id.full_name', 
+            'test._id': '$_id.person_id', 
+            'test.event_name': '$_id.event_name', 
+            'test.total_particip': '$total_particip'
+        }
+    }, {
+        '$replaceRoot': {
+            'newRoot': '$test'
+        }
+    }
+]
+
+
+#########################################################################
+# # HW3 - MongoDB
+# In this part, you found the work done for implementing queries 6 to 10 in MongoDB by leveraging the power of using PyMongo in Python which enables us to use other very useful data manipulation libraries such as Pandas.
+#########################################################################
+# In[1]:
+# Importing the used libraries
+import pandas as pd
+import numpy as np
+from time import time
+
+# In[2]:
+try:
+    import pymongo
+    print("Module Import Successful")
+except ImportError as error:
+    print("Module Import Error")
+    print(error)
+#########################################################################
+# The used schema is simply create one collection that contains the used tables in our analysis. So, I used pandas to read the csv file of each table then I joined these tables together using the keys according to our ERD. After that, I do a couple of pre-processsing functions to clean our big dataframe then convert it to JSON ready to get fed into PyMongo to be used as a collection.
+#########################################################################
+# 1. Reading the csv files into pandas dataframe.
+# In[3]:
+city = pd.read_csv('city.csv', sep=';')
+event = pd.read_csv('event.csv', sep=';')
+games = pd.read_csv('games.csv', sep=';')
+games_city = pd.read_csv('games_city.csv', sep=';')
+competitor_event = pd.read_csv('competitor_event.csv')
+games_competitor = pd.read_csv('games_competitor.csv', sep=';')
+person = pd.read_csv('person.csv', sep=';')
+medal = pd.read_csv('medal.csv', sep=';')
+person_region = pd.read_csv('person_region.csv', sep=';')
+sport = pd.read_csv('sport.csv', sep=';')
+#########################################################################
+# 2. Joining the tables of interest into one single dataframe and droppping the irrelelvant attributes to simplify our dataframe (collection).
+# In[4]:
+temp = pd.merge(medal, competitor_event, how='inner',
+         left_on=['id'], right_on=['medal_id'])
+
+temp = pd.merge(temp, event, how='inner',
+                left_on=['event_id'], right_on=['id'])
+
+temp = pd.merge(temp, sport, how='inner',
+                left_on=['sport_id'], right_on=['id'])
+
+temp = pd.merge(temp, games_competitor, how='inner',
+                left_on=['competitor_id'], right_on=['id'])
+
+temp = pd.merge(temp, games, how='inner',
+                left_on=['games_id'], right_on=['id'])
+
+temp = pd.merge(temp, person, how='inner',
+                left_on=['person_id'], right_on=['id'])
+
+temp = pd.merge(temp, person_region, how='inner',
+                left_on=['person_id'], right_on=['person_id'])
+
+# In[5]:
+final_db = temp.drop(columns=[i for i in temp.columns if 'id' in i]).copy()
+final_db.head()
+#########################################################################
+# 3. Since one of our values in the medal_name attribute (field) is Nan, I replaced it with None instead.
+# In[6]:
+final_db.medal_name.fillna(value='None', inplace=True)
+#########################################################################
+# 4. Convert our pandas dataframe into JSON to be used as a collection later.
+# In[7]:
+final_db_records = final_db.to_dict('records')
+#########################################################################
+# 5. Initiating a client, creating our database, then create our collection as described above.
+# In[8]:
+if 'client' in locals():
+    client.drop_database('PyMongo')
+
+# In[9]:
+client = pymongo.MongoClient("mongodb://localhost:27017/")
+db = client["PyMongo"]
+HW3_collection = db["HW3"]
+
+x = HW3_collection.insert_many(final_db_records)
+
+#print list of the _id values of the inserted documents:
+print(len(x.inserted_ids))
+#########################################################################
+# 6. Displaying some of the documents that we have for validation.
+# In[10]:
+cnt = 0
+print('#'*100)
+for x in db["HW3"].find():
+    print(x)
+    print('#'*100)
+    cnt += 1
+    if cnt == 5:
+        break
+#########################################################################
+# 7. Queries 6 to 10.
+#########################################################################
+# # Q6
+# ## What countries won medals in the Swimming games, and what is the medal counts per each country?
+#########################################################################
+# Output Example:
+# {'_id': {'medal_name': 'Gold', 'region_name': 'USA'}, 'count': 639}
+# {'_id': {'medal_name': 'Silver', 'region_name': 'USA'}, 'count': 252}
+# {'_id': {'medal_name': 'Bronze', 'region_name': 'USA'}, 'count': 176}
+
+# Execution Time: 0.247 sec.
+##############################
+# In[11]:
+start_time = time()
+for x in db.HW3.aggregate([
+    {
+        '$match': {
+            'medal_name': {'$ne': 'None'},
+            'sport_name': {'$regex' : 'Swimming'}
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'medal_name': '$medal_name',
+                'region_name': '$region_name'
+            },
+            'count': {'$sum':1}
+        }
+    },
+    { 
+        '$sort': { 
+            '_id.region_name': 1,
+            'count': -1
+        }
+        
+    }
+]):
+    print(x)
+print('#'*100)
+time() - start_time
+#########################################################################
+# # Q7
+# ## What's the age of the oldest persons who won a Golden medal for each country and what is their sport?
+#########################################################################
+# ### Q7.1 Simple Implementation (Slightly different Results than SQL)
+
+# Output Example:
+# {'Max_Age': 64, 'Region_Name': 'USA', 'Name': 'Charles Jacobus', 'Sport_Name': 'Roque'}
+# {'Max_Age': 64, 'Region_Name': 'Sweden', 'Name': 'Oscar Gomer Swahn', 'Sport_Name': 'Shooting'}
+# {'Max_Age': 56, 'Region_Name': 'Germany', 'Name': 'Nikolaus "Klaus"" Balkenhol"', 'Sport_Name': 'Equestrianism'}
+
+# Execution Time: 0.27 sec.
+############################
+# In[12]:
+start_time = time()
+for x in db.HW3.aggregate([
+    {
+        '$match': {
+            'medal_name': 'Gold'
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'region_name': '$region_name'
+            },
+            'Details': {
+                '$max': {
+                    'Max_Age': '$age',
+                    'Region_Name': '$region_name',
+                    'Name': '$full_name',
+                    'Sport_Name': '$sport_name'
+                }
+            }
+        }
+    },
+    { 
+        '$sort': { 
+            'Details.Max_Age': -1
+        }
+        
+    },
+    { "$replaceRoot": { "newRoot": "$Details" }}
+]):
+    print(x)
+print('#'*100)
+time() - start_time
+#########################################################################
+# ### Q7.2 More complex Implementation (Exactly Same Results as SQL)
+# #### More complex due to using Lookup
+
+# Output Example:
+# 
+# {'sport_name': 'Roque', 'age': 64, 'full_name': 'Charles Jacobus', 'region_name': 'USA'}
+# {'sport_name': 'Shooting', 'age': 64, 'full_name': 'Oscar Gomer Swahn', 'region_name': 'Sweden'}
+# {'sport_name': 'Equestrianism', 'age': 56, 'full_name': 'Josef Carl Peter Neckermann', 'region_name': 'Germany'}
+# {'sport_name': 'Equestrianism', 'age': 56, 'full_name': 'Nikolaus "Klaus"" Balkenhol"', 'region_name': 'Germany'}
+
+# Execution Time: 5.4 sec
+###########################
+# In[13]:
+start_time = time()
+db.HW3.aggregate([
+    {
+        '$match': {
+            'medal_name': 'Gold'
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'region_name': '$region_name'
+            },
+            'max_age': {'$max': '$age'}
+        }
+    },
+    {'$out': 'max_age_sport'}
+])
+
+for x in db.HW3.aggregate([
+    {
+        '$match': {
+            'medal_name': 'Gold'
+        }
+    },
+    {
+        '$lookup': {
+         'from': "max_age_sport",
+         'let': {'region_name_orig': "$region_name",
+                 'age_orig': "$age" },
+         'pipeline': [ {
+            '$match': {
+               '$expr': {
+                  '$and': [
+                     { '$eq': [ "$_id.region_name",  "$$region_name_orig"] },
+                     { '$eq': [ "$max_age", "$$age_orig" ] }
+                  ]
+               }
+            }
+         } ],
+         'as': "max_matches"
+      }
+    },
+    {
+        '$match': {
+            'max_matches': {
+                '$size': 1
+            }
+        }
+    },
+    {
+        '$sort': { 
+            'age': -1
+        }
+    },
+    {
+        '$project':{
+            '_id': 0,
+            'age': 1, 
+            'sport_name': 1, 
+            'region_name': 1, 
+            'full_name': 1}
+    }
+]):
+    print(x)
+print('#'*100)
+time() - start_time
+##################################
+# In the previous query, investigating why we have 4 records in the same sport_name of the player: Gerard Theodor Hubert Van Innis
+
+# In[14]:
+final_db[final_db.full_name == 'Gerard Theodor Hubert Van Innis'][final_db.medal_name == 'Gold']
+# We have 4 records in the same sport_name for him but each record is associated with different event_name, so no problem.
+#########################################################################
+# # Q8
+# ## List the sports played by tallest people ever. And list their nationalities, age and genders?
+#########################################################################
+# ### Q8.1 Simple Implementation (Slightly different Results as SQL)
+
+# Output Example:
+# 
+# {'max_height': 226, 'sport_name': 'Basketball', 'region_name': 'China', 'gender': 'M', 'age': 27}
+# {'max_height': 219, 'sport_name': 'Volleyball', 'region_name': 'Russia', 'gender': 'M', 'age': 23}
+# {'max_height': 214, 'sport_name': 'Handball', 'region_name': 'Germany', 'gender': 'M', 'age': 33}
+# 
+# Execution Time: 1.09 sec.
+##############################
+# In[15]:
+start_time = time()
+for x in db.HW3.aggregate([
+    {
+        '$group': {
+            '_id': {
+                'sport_name': '$sport_name'
+            },
+            'Details': {
+                '$max': {
+                    'max_height': '$height',
+                    'sport_name': '$sport_name',
+                    'region_name': '$region_name',
+                    'gender': '$gender',
+                    'age': '$age'
+            }
+
+            }
+        }
+    },
+    { 
+        '$sort': { 
+            'Details.max_height': -1
+        }
+        
+    },
+    { "$replaceRoot": { "newRoot": "$Details" }}
+    
+]):
+    print(x)
+print('#'*100)
+time() - start_time
+#########################################################################
+# ### Q8.2 More complex Implementation (Exactly Same Results as SQL)
+# #### More complex due to using Lookup
+
+# Output Example:
+# 
+# {'sport_name': 'Basketball', 'age': 27, 'gender': 'M', 'height': 226, 'region_name': 'China'}
+# {'sport_name': 'Basketball', 'age': 20, 'gender': 'M', 'height': 226, 'region_name': 'China'}
+# {'sport_name': 'Basketball', 'age': 23, 'gender': 'M', 'height': 226, 'region_name': 'China'}
+# {'sport_name': 'Volleyball', 'age': 23, 'gender': 'M', 'height': 219, 'region_name': 'Russia'}
+# 
+# Execution Time: 79.26 sec.
+###############################
+# In[16]:
+start_time = time()
+db.HW3.aggregate([
+    {
+        '$group': {
+            '_id': {
+                'sport_name': '$sport_name'
+            },
+            'max_height': {'$max': '$height'}
+        }
+    },
+    { 
+        '$sort': { 
+            'max_height': -1
+        }
+        
+    },
+    {'$out': 'max_heights_sport'}
+])
+
+for x in db.HW3.aggregate([
+    {
+        '$lookup': {
+         'from': "max_heights_sport",
+         'let': {'sport_name_orig': "$sport_name",
+                 'height_orig': "$height" },
+         'pipeline': [ {
+            '$match': {
+               '$expr': {
+                  '$and': [
+                     { '$eq': [ "$_id.sport_name",  "$$sport_name_orig"] },
+                     { '$eq': [ "$max_height", "$$height_orig" ] }
+                  ]
+               }
+            }
+         } ],
+         'as': "max_matches"
+      }
+    },
+    {
+        '$match': {
+            'max_matches': {
+                '$size': 1
+            }
+        }
+    },
+    {
+        '$sort': { 
+            'height': -1
+        }
+    },
+    {
+        '$project':{
+            '_id': 0,
+            'height': 1, 
+            'sport_name': 1, 
+            'region_name': 1, 
+            'gender': 1, 
+            'age': 1}
+    }
+]):
+    print(x)
+print('#'*100)
+time() - start_time
+#########################################################################
+# # Q9
+# ## List the total number of won medals for each country. And for which sport each country won the highest number of these medals?
+#########################################################################
+# ### Tons simpler than SQL (Exactly Same Results as SQL)
+
+# Output Example:
+# 
+# {'_id': {'region_name': 'USA'}, 'tot_num_medals': 5414, 'Details': {'dominant_num_medals': 1038, 'dominant_sport': 'Swimming'}}
+# {'_id': {'region_name': 'Soviet Union'}, 'tot_num_medals': 2658, 'Details': {'dominant_num_medals': 290, 'dominant_sport': 'Gymnastics'}}
+# {'_id': {'region_name': 'Germany'}, 'tot_num_medals': 2395, 'Details': {'dominant_num_medals': 258, 'dominant_sport': 'Rowing'}}
+# 
+# Execution Time: 0.295 sec.
+###############################
+# In[17]:
+start_time = time()
+for x in db.HW3.aggregate([
+    {
+        '$match': {
+            'medal_name': {'$ne': 'None'}
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'region_name': '$region_name',
+                'sport_name': '$sport_name'
+            },
+            'num_medals': {'$sum': 1}
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'region_name': '$_id.region_name'
+            },
+            'tot_num_medals': {'$sum': '$num_medals'},
+            'Details': {
+                '$max': {
+                    'dominant_num_medals': '$num_medals',
+                    'dominant_sport': '$_id.sport_name',
+                }
+            }
+        }
+    },
+    {
+        '$sort': {'tot_num_medals': -1}
+    }
+    
+]):
+    print(x)
+print('#'*100)
+time() - start_time
+#########################################################################
+# # Q10
+# ## What is the percentage of number of won medals for each country over the last ten years compared to the whole period (20 years, 1896 to 2016)?
+#########################################################################
+# Output Example:
+# 
+# {'20years_num_medals': 5414, 'region': 'USA', '1896_2005_cnt': 4379, '2006_2016_cnt': 1035, 'last_10years_pct': 19.11}
+# {'20years_num_medals': 2658, 'region': 'Soviet Union', '1896_2005_cnt': 2654, '2006_2016_cnt': 4, 'last_10years_pct': 0.15}
+# {'20years_num_medals': 2395, 'region': 'Germany', '1896_2005_cnt': 1899, '2006_2016_cnt': 496, 'last_10years_pct': 20.7}
+# 
+# Execution Time: 0.29 sec.
+###############################
+# To implement this query, we have to make Full Outer Join.
+# 
+# Since, it is not supported in MongoDB, to achieve a Full Outer Join, you either have to do it client-side or perform separate multiple aggregations (using $lookup) which when combined, will form the Full Outer Join; you can use a temporary collection for combining these combined results; or re-modelling your schemas.
+# So, we decided to go for re-modelling our schema, and create a new collection for this query. The idea is to add two new fields for each documetn which are simply flags of the period of the game. The two fields are '1896-2005' and '2006-2016'. Simply, we check what is the games_year, and if it is between '1896-2005' we add one in that flag and 0 for the other flag, '2006-2016' and vice versa.
+#########################################################################
+# In[18]:
+re_final_db = final_db.copy()
+
+# In[19]:
+re_final_db['1896-2005'] = np.where(re_final_db.games_year <= 2005, 1, 0)
+re_final_db['2006-2016'] = np.where(re_final_db.games_year > 2005, 1, 0)
+
+# In[20]:
+re_final_db[re_final_db.games_year <= 2005].head(2)
+
+# In[21]:
+re_final_db[re_final_db.games_year > 2005].head(2)
+
+# In[22]:
+#re_final_db.index = re_final_db.index.map(str)
+
+# In[23]:
+re_final_db_records = re_final_db.to_dict('records')
+
+# In[24]:
+db.HW3_Q10.drop()
+
+
+# In[25]:
+HW3_Q10_collection = db["HW3_Q10"]
+
+x = HW3_Q10_collection.insert_many(re_final_db_records)
+
+# In[26]:
+start_time = time()
+for x in db.HW3_Q10.aggregate([
+    {
+        '$match': {
+            'medal_name': {'$ne': 'None'}
+        }
+    },
+    {
+        '$group': {
+            '_id': {
+                'region_name': '$region_name'
+            },
+            
+            '20years_num_medals': {'$sum': 1},
+            'region': {'$first': '$region_name'},
+            '1896_2005_cnt': {'$sum': '$1896-2005'},
+            '2006_2016_cnt': {'$sum': '$2006-2016'}
+        }
+    },
+    {
+        '$project': { 
+            '_id': 0,
+            'region': 1,
+            '20years_num_medals': 1,
+            '1896_2005_cnt': 1,
+            '2006_2016_cnt': 1,
+            'last_10years_pct': {
+                '$trunc' : [
+                    {'$multiply': 
+                    [
+                        {'$divide': ['$2006_2016_cnt', '$20years_num_medals']}, 
+                        100]
+                    }, 2]}
+        }
+    },
+    {
+        '$sort': {'20years_num_medals': -1}
+    }
+    
+]):
+    print(x)
+print('#'*100)
+time() - start_time
+#########################################################################
+
+
