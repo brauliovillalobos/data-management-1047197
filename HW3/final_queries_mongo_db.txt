@@ -1,0 +1,400 @@
+#########################################################################
+# Our GitHub Repo: https://github.com/brauliovillalobos/DM
+#########################################################################
+
+#*************************************************************************#
+#Homework 3 NoSQL - Data Management Course
+
+#Ahmed Omar & Braulio Villalobos
+#*************************************************************************#
+
+## The following lines correspond to the code used to replicate the Queries 1 to 5, of the HW1 and HW2, by using MongoDB. 
+## As exposed in the oral presentation, we decided to test 2 different approaches, as result: 
+##      * Queries 1 to 5: were implemented using MongoDB Compass and most specifically aggregation pipelines. 
+##      * Queries 6 to 10: were implemented using PyMongo in Python. 
+
+
+# FIRST APPROACH - MONGODB COMPASS - Queries 1 to 5
+
+# ****************Conversion of SQL to NoSQL******************************#
+#Firstly, the following code was used to Join all the tables of the original database into one single database. The fields that were repeated, since they were the keys between tables, 
+#were removed in such a way that we ended up without repeated fields. 
+
+SELECT principal.id, principal.games_id, principal.person_id, principal.age, games_division.games_year, games_division.games_name, 
+games_division.season,games_division.city_id, games_division.city_name, games_division.country_name, games_division.country_id,
+competition_division.event_id, competition_division.medal_id, competition_division.sport_id, competition_division.event_name,competition_division.sport_name,
+person_division.full_name, person_division.height, person_division.gender, person_division.weight, person_division.region_id, person_division.region_name
+FROM olympics_scen_1.games_competitor AS principal
+LEFT JOIN (SELECT a.id AS id_games, a.games_year, a.games_name, a.season,b.city_id,c.city_name, c.country_name,c.country_id 
+            FROM olympics_scen_1.games as a
+            LEFT JOIN olympics_scen_1.games_city as b
+            ON a.id = b.games_id
+            LEFT JOIN olympics_scen_1.city as c
+            ON b.city_id = c.id) AS games_division
+ON principal.games_id = games_division.id_games
+LEFT JOIN (SELECT f.event_id, f.competitor_id, f.medal_id, g.sport_id, g.event_name,h.sport_name
+            FROM olympics_scen_1.competitor_event as f
+            LEFT JOIN olympics_scen_1.event as g
+            ON f.event_id= g.id
+            LEFT JOIN olympics_scen_1.sport as h
+            ON g.sport_id= h.id) AS competition_division
+ON principal.id = competition_division.competitor_id
+LEFT JOIN (SELECT d.id, d.full_name, d.height, d.gender, d.weight, e.region_id, e.region_name
+            FROM olympics_scen_1.person as d
+            LEFT JOIN olympics_scen_1.person_region as e
+            ON d.id = e.person_id) AS person_division
+ON principal.person_id = person_division.id;
+
+#Secondly, we exported the results directly to a JSON format and saved it. The resulting Json document had the following format: 
+    {
+        "id" : 1,
+        "games_id" : 1,
+        "person_id" : 1,
+        "age" : 24,
+        "games_year" : 1992,
+        "games_name" : "1992 Summer",
+        "season" : "Summer",
+        "city_id" : 1,
+        "city_name" : "Barcelona",
+        "country_name" : "Spain",
+        "country_id" : 64,
+        "event_id" : 1,
+        "medal_id" : 4,
+        "sport_id" : 9,
+        "event_name" : "Basketball Men's Basketball",
+        "sport_name" : "Basketball",
+        "full_name" : "A Dijiang",
+        "height" : 180,
+        "gender" : "M",
+        "weight" : 80,
+        "region_id" : 42,
+        "region_name" : "China"
+    }
+
+# The whole document can be viewed and downloaded by following: https://github.com/brauliovillalobos/DM/tree/main/HW3/olympic_games_complete.json
+
+#Last, we import it into MongoDB Compass by means of the following command, which was run in the terminal: 
+
+mongoimport  --jsonArray /Users/brauliovillalobos/Documents/Data_Science_Master_Degree_Sapienza_2021_2023/II_Semester/DM/NoSQL/HW3/olympic_games_complete.json -d test -c olympics_games_total --drop
+
+#Once we created the collection in MongoDB Compass, we started to replicate the queries of HW1 and HW2 by means of aggregation pipelines. Following you can find the codes:
+
+#*************************************************************************#
+#Query #1
+#Which are the most popular cities in which the Olympics have taken place?
+
+#For this we first keep just 2 Keys of the Collection: city_name and games_name. Then we carry out some group clauses and finaly count to obtain the most popular cities
+#in which the Olympics have taken place.
+#*************************************************************************#
+
+[
+    {
+        '$project': {
+            'city_name': 1, 
+            'games_name': 1
+        }
+    }, {
+        '$group': {
+            '_id': {
+                'capital': '$city_name'
+            }, 
+            'game_ident': {
+                '$addToSet': '$games_name'
+            }
+        }
+    }, {
+        '$unwind': {
+            'path': '$game_ident', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$group': {
+            '_id': '$_id.capital', 
+            'sum': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'sum': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #2
+#Which are the most medal winner countries, in the 5 sports with most participants, from the Olympics that took place from 1960(exclusive) until 2016(exclusive)?
+
+#To answer this we need to first identify the 5 sports with the most participants in history, but we also need several others Keys to answer the rest of the query.
+#For this purpose we first create a collection in which we identify those 5 most popular sports, according to the historic number of participants. To do this
+#we just group by sport and sum, then we sort according to that sum (called total_sport), we then limit to only take the first 5 Documents and 
+#we create the collection query_2_5_sports by means of the "out" command
+
+
+#After it we make use of the lookup clause to create a new Key called matching_sport which is empty if the sport_id of the document isn't in the 5 _id of the query_2_5_sports collection
+#and NOT empty if it is. Then we use this matching_sport and its size to identify if the document belongs to one of the 5 most popular sports (previously identified) and keep only these documents. 
+#Then we make us of the match clause to guarantee that only medal winners and participations in Olympic games between the desired years are kept. Finally we group by region_name, count and sort. 
+#*************************************************************************#
+
+[
+    {
+        '$group': {
+            '_id': '$sport_id', 
+            'total_sport': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total_sport': -1
+        }
+    }, {
+        '$limit': 5
+    }, {
+        '$out': 'query_2_5_sports'
+    }
+]
+
+
+[
+    {
+        '$lookup': {
+            'from': 'query_2_5_sports', 
+            'localField': 'sport_id', 
+            'foreignField': '_id', 
+            'as': 'matching_sport'
+        }
+    }, {
+        '$match': {
+            'matching_sport': {
+                '$size': 1
+            }
+        }
+    }, {
+        '$match': {
+            '$or': [
+                {
+                    'medal_id': 1
+                }, {
+                    'medal_id': 2
+                }, {
+                    'medal_id': 3
+                }
+            ]
+        }
+    }, {
+        '$match': {
+            'games_year': {
+                '$gt': 1961, 
+                '$lt': 2015
+            }
+        }
+    }, {
+        '$group': {
+            '_id': '$region_name', 
+            'total': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #3
+#Which are the countries that have NEVER hosted the Olympics but have won the most number of medals? 
+
+#To answer this question we first make the collection query_3_host_countries that identify the countries in which the Olympics have taken place.
+#Then, using this collection and the lookup clause, we create the matching_host Key in the main collection such that, similarly to what we did on query 2, we identify
+#by means of the size of the matching_host key if the region_name belongs to the query_3_host_countries or not. In this way, if the matching_host is empty
+#we know that the region_name (to which each competitor belonged to) isn't present in the hosting countries and therefore that country has never hosted the Olympics. 
+#In this way, we keep only those competitors that belong to a country that have never hosted the Olympics. 
+#We then use the matching clause to keep only medal winners and the group and count to count, by country, which are the ones that have won the greater number of medals. 
+#*************************************************************************#
+
+[
+    {
+        '$group': {
+            '_id': '$country_name', 
+            'country_host': {
+                '$count': {}
+            }
+        }
+    }, {
+        '$out': 'query_3_host_countries'
+    }
+]
+
+
+[
+    {
+        '$lookup': {
+            'from': 'query_3_host_countries', 
+            'localField': 'region_name', 
+            'foreignField': '_id', 
+            'as': 'matching_host'
+        }
+    }, {
+        '$match': {
+            'matching_host': {
+                '$size': 0
+            }
+        }
+    }, {
+        '$match': {
+            '$or': [
+                {
+                    'medal_id': 1
+                }, {
+                    'medal_id': 2
+                }, {
+                    'medal_id': 3
+                }
+            ]
+        }
+    }, {
+        '$group': {
+            '_id': '$region_name', 
+            'total_medals': {
+                '$count': {}
+            }
+        }
+    }, {
+        '$sort': {
+            'total_medals': -1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #4
+#Who won a golden medal in his FIRST appearance in the Olympic games? 
+
+#For this we need to first identify the first appearance in the Olympic Games of each person (not competitor). This is easily done by a group clause over the person_id Key and
+#by using the min clause over the games_year. With this information, we create an auxiliary collection that stores the first year of appearance for each person_id. 
+
+#Then we keep only golden medal winners and we use the lookup to create a "first_appearance" Key from the previously created collection query_4_min_year. 
+#We then need to compare if the games_year of each document corresponds to the first appearance of tha person_id, but before we must unwind the first_appearance to take it out from the
+#Object and make the needed comparison. 
+#Then we make us of the clause "expr" coupled with "eq" which checks for equality between the first apperance of that person_id in Olympic Games and the year to which each document belongs to. 
+#We just keep documents where this equality holds. Finally we just make use of project clause to retrieve some details about the people that fulfilled the carried out steps. 
+
+#***Possible improvement***: By the end of this homework, when I was doing the Query #5, I discovered the addFields function. It is then possible to make an improvement to this query by
+#using the addFields function to create a new field that contains the first appearance in the Olympic Games by grouping by person_id. In this way it would be possible to skip two things: 
+#First, the creation of an auxiliary collection and second, the use of the lookup function, which actually slows down significantly the execution. 
+
+#***Note on Complexity***:
+#If we make a comparison of the complexity of the Query #4 in SQL and NoSQL Language it is possible to note a huge difference as the SQL language implementation makes use of a dense rank, along
+#with several joins between tables and the WITH clause. Identifying the first appearance of each person it's not an easy task in SQL, while in NoSQL is a very straightforward process. 
+#For this reason, this is taken as a significant advantage of NoSQL language over SQL, although this applies to this query, under this collection and this structure. 
+#It is therefore not a general advantage
+#as there are queries that are signifncalty more straightforward and simple in SQL than in NoSQL. 
+#*************************************************************************
+
+[
+    {
+        '$group': {
+            '_id': '$person_id', 
+            'first_parti': {
+                '$min': '$games_year'
+            }
+        }
+    }, {
+        '$out': 'query_4_min_year'
+    }
+]
+
+
+[
+    {
+        '$match': {
+            'medal_id': 1
+        }
+    }, {
+        '$lookup': {
+            'from': 'query_4_min_year', 
+            'localField': 'person_id', 
+            'foreignField': '_id', 
+            'as': 'first_appearance'
+        }
+    }, {
+        '$unwind': {
+            'path': '$first_appearance', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$match': {
+            '$expr': {
+                '$eq': [
+                    '$games_year', '$first_appearance.first_parti'
+                ]
+            }
+        }
+    }, {
+        '$project': {
+            'full_name': 1, 
+            'games_year': 1, 
+            'person_id': 1, 
+            'gender': 1, 
+            'height': 1, 
+            'weight': 1, 
+            'event_id': 1
+        }
+    }
+]
+
+#*************************************************************************#
+#Query #5 - 
+#Who are the people that have competed, without ever winning a medal, on the SAME DISCIPLINE for the greatest number of olympic games 
+
+#To answer this we keep only people that didn't win a medal, we then group by some fields that are useful for the final response and make a sum. 
+#We then sort, unwind and add new fields that are the ones we want to see in the final output. 
+
+#This query, as with query #4, has a relatively little complexity in MongoDB and in the approach we followed for first 5 queries (merging all SQL tables into 1 unique table and then converting
+#to NoSQL, to finally having one collection with 272k documents) with respect to the query that was needed in SQL language to give answer to the same question. This is then a significant advantage
+#of NoSQL as for this context it is significantly less complex than SQL.
+
+#*************************************************************************#
+
+[
+    {
+        '$match': {
+            'medal_id': 4
+        }
+    }, {
+        '$group': {
+            '_id': {
+                'person_id': '$person_id', 
+                'full_name': '$full_name', 
+                'sport_id': '$sport_id', 
+                'event_name': '$event_name'
+            }, 
+            'total_particip': {
+                '$sum': 1
+            }
+        }
+    }, {
+        '$sort': {
+            'total_particip': -1
+        }
+    }, {
+        '$unwind': {
+            'path': '$first.person_id', 
+            'preserveNullAndEmptyArrays': True
+        }
+    }, {
+        '$addFields': {
+            'test.full_name': '$_id.full_name', 
+            'test._id': '$_id.person_id', 
+            'test.event_name': '$_id.event_name', 
+            'test.total_particip': '$total_particip'
+        }
+    }, {
+        '$replaceRoot': {
+            'newRoot': '$test'
+        }
+    }
+]
